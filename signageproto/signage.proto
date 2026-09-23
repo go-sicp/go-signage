@@ -1,0 +1,172 @@
+syntax = "proto3";
+
+package io.gosicp.gosignage.v1;
+
+option go_package = "github.com/go-sicp/go-signage/signageproto;signageproto";
+
+import "google/protobuf/empty.proto";
+
+// Display drives a GoodDisplay e-paper panel via an IT8951 controller over
+// SPI. It runs on each Pi (push direction).
+//
+// Authentication: every RPC must carry an `authorization: Bearer <token>`
+// header in metadata. The token is generated and printed by the server at
+// first launch.
+//
+// Transport: TLS 1.2+ with a server-presented self-signed certificate
+// generated and persisted at first launch. Clients trust the certificate
+// explicitly (--cert) or pin its SHA-256 fingerprint.
+service Display {
+  rpc GetInfo(google.protobuf.Empty) returns (DisplayInfo);
+  rpc Health(google.protobuf.Empty) returns (HealthResponse);
+  rpc LoadImage(stream LoadImageChunk) returns (LoadImageResponse);
+  rpc Refresh(RefreshRequest) returns (RefreshResponse);
+  rpc Sleep(google.protobuf.Empty) returns (google.protobuf.Empty);
+  rpc Standby(google.protobuf.Empty) returns (google.protobuf.Empty);
+  rpc SetPullMode(SetPullModeRequest) returns (google.protobuf.Empty);
+  rpc GetPullMode(google.protobuf.Empty) returns (PullModeStatus);
+  rpc Rotate(google.protobuf.Empty) returns (RotateResponse);
+  rpc ReissueClientCert(google.protobuf.Empty) returns (ReissueClientCertResponse);
+  rpc GetMetrics(google.protobuf.Empty) returns (GetMetricsResponse);
+}
+
+// Content is the central rendering server. Pi agents pull frames from it
+// when configured in pull mode (push direction always remains available
+// via Display.LoadImage/Refresh).
+service Content {
+  rpc GetFrame(GetFrameRequest) returns (GetFrameResponse);
+  rpc ReportStatus(ReportStatusRequest) returns (ReportStatusResponse);
+}
+
+message DisplayInfo {
+  int32 width = 1;
+  int32 height = 2;
+  uint32 image_buffer_address = 3;
+  string firmware_version = 4;
+  string lut_version = 5;
+  string app_version = 6;
+}
+
+// WaveformMode mirrors the IT8951 controller's display modes. Values match
+// the canonical IT8951 firmware mode IDs so the cast in the SPI command is
+// a no-op.
+enum WaveformMode {
+  WAVEFORM_MODE_UNSPECIFIED = 0;
+  WAVEFORM_MODE_INIT = 1;
+  WAVEFORM_MODE_DU = 2;
+  WAVEFORM_MODE_GC16 = 3;
+  WAVEFORM_MODE_GL16 = 4;
+  WAVEFORM_MODE_GLR16 = 5;
+  WAVEFORM_MODE_GLD16 = 6;
+  WAVEFORM_MODE_A2 = 7;
+}
+
+message Region {
+  int32 x = 1;
+  int32 y = 2;
+  int32 w = 3;
+  int32 h = 4;
+}
+
+message LoadImageHeader {
+  WaveformMode mode = 1;
+  optional Region region = 2;
+  // bits_per_pixel is one of 1, 2, 4, 8. Most signage flows use 4 (16
+  // grayscale levels) for GC16/GL16, or 1 for DU/A2 fast modes.
+  int32 bits_per_pixel = 3;
+  int64 total_bytes = 4;
+}
+
+message LoadImageChunk {
+  oneof payload {
+    LoadImageHeader header = 1;
+    bytes data = 2;
+  }
+}
+
+message LoadImageResponse {
+  string frame_hash = 1;
+  int64 elapsed_ms = 2;
+}
+
+message RefreshRequest {
+  WaveformMode mode = 1;
+  optional Region region = 2;
+}
+
+message RefreshResponse {
+  int64 elapsed_ms = 1;
+}
+
+message SetPullModeRequest {
+  bool enabled = 1;
+  string content_server_addr = 2;
+  string device_id = 3;
+  int32 poll_interval_seconds = 4;
+}
+
+message PullModeStatus {
+  bool enabled = 1;
+  string content_server_addr = 2;
+  string device_id = 3;
+  int32 poll_interval_seconds = 4;
+  int64 last_pull_unix = 5;
+  string last_frame_hash = 6;
+  string last_error = 7;
+}
+
+message HealthResponse {
+  bool device_open = 1;
+  string last_error = 2;
+  string server_version = 3;
+  int64 uptime_seconds = 4;
+  bool pull_mode_enabled = 5;
+}
+
+message RotateResponse {
+  int64 scheduled_at_ms = 1;
+}
+
+message ReissueClientCertResponse {
+  string client_cert_pem = 1;
+  string client_key_pem = 2;
+  string client_cert_fingerprint = 3;
+  int64 server_restart_in_ms = 4;
+}
+
+message GetMetricsResponse {
+  string prom_text = 1;
+}
+
+// --- Content service messages ----------------------------------------------
+
+message GetFrameRequest {
+  string device_id = 1;
+  string current_frame_hash = 2;
+  int32 width_hint = 3;
+  int32 height_hint = 4;
+}
+
+message GetFrameResponse {
+  bool unchanged = 1;
+  string frame_hash = 2;
+  bytes png = 3;
+  int32 next_poll_seconds = 4;
+  WaveformMode suggested_mode = 5;
+}
+
+message ReportStatusRequest {
+  string device_id = 1;
+  string current_frame_hash = 2;
+  string firmware_version = 3;
+  string lut_version = 4;
+  int32 panel_width = 5;
+  int32 panel_height = 6;
+  string app_version = 7;
+  string last_error = 8;
+  int64 uptime_seconds = 9;
+}
+
+message ReportStatusResponse {
+  int32 next_report_seconds = 1;
+}

@@ -1,0 +1,118 @@
+version: "3"
+
+vars:
+  PROTO_DIR: signageproto
+  AGENT_BIN: bin/signage-agent
+  CONTENT_BIN: bin/signage-content
+  CLI_BIN: bin/signage-cli
+  ARM64_GOOS: linux
+  ARM64_GOARCH: arm64
+
+tasks:
+  default:
+    silent: true
+    cmds:
+      - task: --list-all
+
+  # ---------------------------------------------------------------- proto
+
+  proto:
+    desc: "Regenerate Go protobuf + gRPC stubs from signageproto/signage.proto"
+    sources:
+      - "{{.PROTO_DIR}}/signage.proto"
+    generates:
+      - "{{.PROTO_DIR}}/signage.pb.go"
+      - "{{.PROTO_DIR}}/signage_grpc.pb.go"
+    cmds:
+      - protoc --go_out={{.PROTO_DIR}} --go_opt=paths=source_relative
+               --go-grpc_out={{.PROTO_DIR}} --go-grpc_opt=paths=source_relative
+               -I {{.PROTO_DIR}}
+               signage.proto
+
+  # ---------------------------------------------------------------- build
+
+  build:
+    desc: "Build every binary for the host platform"
+    cmds:
+      - task: build:cli
+      - task: build:agent
+      - task: build:content
+      - task: vet
+
+  build:cli:
+    desc: "Build signage-cli"
+    cmds:
+      - mkdir -p bin
+      - go build -o {{.CLI_BIN}} ./signage-cli/
+
+  build:content:
+    desc: "Build signage-content (central rendering server)"
+    cmds:
+      - mkdir -p bin
+      - go build -o {{.CONTENT_BIN}} ./signage-content/
+
+  build:agent:
+    desc: "Build signage-agent for the host platform (stub display on darwin)"
+    cmds:
+      - mkdir -p bin
+      - go build -o {{.AGENT_BIN}} ./signage-agent/
+
+  build:agent:pi:
+    desc: "Cross-compile signage-agent for Pi Zero 2W (linux/arm64)"
+    cmds:
+      - mkdir -p bin
+      - GOOS={{.ARM64_GOOS}} GOARCH={{.ARM64_GOARCH}} go build -o {{.AGENT_BIN}}.arm64 ./signage-agent/
+
+  # ----------------------------------------------------------------- test
+
+  test:
+    desc: "Run Go unit tests"
+    cmds:
+      - go test ./...
+
+  vet:
+    desc: "go vet on all packages (stub variant on darwin)"
+    cmds:
+      - go vet ./...
+
+  fmt:
+    desc: "gofmt -s in place"
+    cmds:
+      - gofmt -s -w .
+
+  fmt:check:
+    desc: "Fail if any file is not gofmt -s clean"
+    cmds:
+      - >-
+        diff=$(gofmt -s -l . | tee /dev/stderr);
+        if [ -n "$diff" ]; then echo "gofmt -s issues found"; exit 1; fi
+
+  staticcheck:
+    desc: "Run staticcheck (skipped if not installed). Excludes U1000 because cross-platform packages have symbols only consumed under //go:build linux."
+    cmds:
+      - >-
+        if command -v staticcheck >/dev/null; then
+          staticcheck -checks="inherit,-U1000" ./...;
+        else
+          echo "staticcheck not installed; skipping"; fi
+
+  ci:
+    desc: "Composite gate for CI: fmt:check + vet + test + build"
+    cmds:
+      - task: fmt:check
+      - task: vet
+      - task: test
+      - task: build:cli
+      - task: build:content
+      - task: build:agent
+
+  # -------------------------------------------------------------- CLI flow
+
+  cli:discover:
+    desc: "Browse `_signage._tcp.` for 5 seconds"
+    cmds:
+      - go run ./signage-cli/ discover --timeout 5
+
+  clean:
+    cmds:
+      - rm -rf bin/ tls/
