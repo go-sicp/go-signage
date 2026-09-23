@@ -165,10 +165,18 @@ func (d *driver) writeCmd(cmd uint16) error {
 	if err := d.waitReady(); err != nil {
 		return err
 	}
-	buf := []byte{
-		byte(preambleWriteCmd >> 8), byte(preambleWriteCmd),
-		byte(cmd >> 8), byte(cmd),
-	}
+	// Both words go out big-endian, the way writeData and readData below
+	// already do it. The hand-rolled version here did not compile:
+	//
+	//	byte(preambleWriteCmd)   // constant 24576 overflows byte
+	//
+	// preambleWriteCmd is the CONSTANT 0x6000, so `byte(...)` is evaluated at
+	// compile time and must be representable — unlike byte(cmd), where cmd is
+	// a variable and the conversion simply truncates at run time. The two look
+	// identical on the same line and are not the same operation.
+	buf := make([]byte, 4)
+	binary.BigEndian.PutUint16(buf[0:2], preambleWriteCmd)
+	binary.BigEndian.PutUint16(buf[2:4], cmd)
 	return d.conn.Tx(buf, nil)
 }
 

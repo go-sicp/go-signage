@@ -25,6 +25,14 @@ jobs:
           if [ -n "$drift" ]; then echo "::error::not gofmt-clean:"; echo "$drift"; exit 1; fi
       - name: build
         run: go build ./...
+      # The panel driver is behind display_linux.go, so `go build ./...` on a
+      # Mac never compiles it — which is how `constant 24576 overflows byte`
+      # reached this repository. Build for the target, not only for the host;
+      # arm64 is what the panel runs on.
+      - name: build for linux
+        run: |
+          GOOS=linux GOARCH=amd64 go build ./...
+          GOOS=linux GOARCH=arm64 go build ./...
       - name: vet
         run: go vet ./...
       - name: test
