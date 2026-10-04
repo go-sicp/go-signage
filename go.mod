@@ -1,6 +1,6 @@
 module github.com/go-sicp/go-signage
 
-go 1.26
+go 1.27.1
 
 require (
 	github.com/chromedp/cdproto v0.0.0-20260922220944-a19bff23514f
