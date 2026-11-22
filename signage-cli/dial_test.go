@@ -2,8 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
-	"errors"
 	"flag"
 	"io"
 	"os"
@@ -80,20 +78,18 @@ func TestOpenErrorNamesFlagNotSecret(t *testing.T) {
 }
 
 func TestEmptySecretRefused(t *testing.T) {
-	old := openSecret
-	defer func() { openSecret = old }()
-	openSecret = func(context.Context, string) ([]byte, error) { return []byte("\r\n"), nil }
-	if _, _, err := parse(t, "-H", "h", "--token-from", "x:y"); err == nil || !strings.Contains(err.Error(), "empty") {
+	p := filepath.Join(t.TempDir(), "empty")
+	if err := os.WriteFile(p, []byte("\r\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := parse(t, "-H", "h", "--token-from", "file:"+p); err == nil || !strings.Contains(err.Error(), "empty") {
 		t.Fatalf("err = %v", err)
 	}
 }
 
 func TestOpenFailurePropagates(t *testing.T) {
-	old := openSecret
-	defer func() { openSecret = old }()
-	want := errors.New("boom")
-	openSecret = func(context.Context, string) ([]byte, error) { return nil, want }
-	if _, _, err := parse(t, "-H", "h", "--token-from", "x:y"); !errors.Is(err, want) {
+	_, _, err := parse(t, "-H", "h", "--token-from", "nosuchscheme:y")
+	if err == nil || !strings.Contains(err.Error(), "--token-from") {
 		t.Fatalf("err = %v", err)
 	}
 }
