@@ -189,13 +189,14 @@ func (s *Server) Stop() error {
 }
 
 // ConnectURI returns the operator-friendly signage:// URL embedding host,
-// port, token and short fingerprint, for QR-code generation.
+// port and short fingerprint. It never carries the bearer token: a URL ends
+// up in argv, shell history and logs. The token travels by reference
+// (signage-cli --token-from).
 func (s *Server) ConnectURI(host string) string {
 	if host == "" {
 		host = "127.0.0.1"
 	}
 	v := url.Values{}
-	v.Set("token", s.cm.Token())
 	v.Set("fp", truncatedFingerprint(s.cm.Fingerprint()))
 	return fmt.Sprintf("signage://%s:%d?%s", host, s.ListeningPort(), v.Encode())
 }

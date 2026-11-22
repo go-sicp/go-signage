@@ -8,6 +8,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -105,12 +106,7 @@ func main() {
 	defer srv.Stop()
 
 	cm := srv.CertManager()
-	fmt.Printf("signage-agent listening on :%d\n", srv.ListeningPort())
-	fmt.Printf("  fingerprint:  %s\n", cm.Fingerprint())
-	fmt.Printf("  token:        %s\n", cm.Token())
-	fmt.Printf("  admin token:  %s\n", cm.AdminToken())
-	fmt.Printf("  files dir:    %s\n", filesDir)
-	fmt.Printf("  connect URI:  %s\n", srv.ConnectURI(""))
+	printBanner(os.Stdout, srv.ListeningPort(), cm, filesDir, srv.ConnectURI(""))
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
@@ -123,6 +119,25 @@ func main() {
 
 	<-ctx.Done()
 	log.Println("signage-agent shutting down")
+}
+
+// banner is what printBanner needs from the CertManager; the tokens
+// themselves are deliberately not part of it.
+type banner interface {
+	Fingerprint() string
+	TokenPath() string
+	AdminTokenPath() string
+}
+
+// printBanner never prints a token: stdout reaches journald, container logs
+// and scrollback. It names the 0600 files that hold them instead.
+func printBanner(w io.Writer, port int, cm banner, filesDir, connectURI string) {
+	fmt.Fprintf(w, "signage-agent listening on :%d\n", port)
+	fmt.Fprintf(w, "  fingerprint:  %s\n", cm.Fingerprint())
+	fmt.Fprintf(w, "  token file:   %s\n", cm.TokenPath())
+	fmt.Fprintf(w, "  admin token file: %s\n", cm.AdminTokenPath())
+	fmt.Fprintf(w, "  files dir:    %s\n", filesDir)
+	fmt.Fprintf(w, "  connect URI:  %s\n", connectURI)
 }
 
 func openDisplay(spiPort, rst, busy string, hz int64, vcom int) (signagelib.Display, error) {
