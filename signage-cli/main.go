@@ -31,7 +31,9 @@ Commands:
 Common flags (all RPC commands):
   -H, --host        Server host (required)
   -p, --port        Server port (default 50051)
-  -t, --token       Bearer token (required unless --insecure-anon)
+      --token-from  Bearer token by reference (required): systemd-creds:NAME,
+                    keychain:SERVICE/ACCOUNT, keepassxc:ENTRY or file:PATH
+  -t, --token       DEPRECATED, visible in ps; use --token-from (removed next minor)
       --cert        Server cert PEM to trust (skip if --insecure)
       --client-cert Client cert PEM for mTLS
       --client-key  Client key PEM for mTLS

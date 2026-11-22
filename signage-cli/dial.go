@@ -7,8 +7,11 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"strings"
 
+	"github.com/go-authn/secretsource"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
@@ -19,6 +22,9 @@ type commonFlags struct {
 	host       string
 	port       int
 	token      string
+	tokenFrom  string
+	fs         *flag.FlagSet
+	stderr     io.Writer
 	certFile   string
 	clientCert string
 	clientKey  string
@@ -30,8 +36,10 @@ func registerCommonFlags(fs *flag.FlagSet, c *commonFlags) {
 	fs.StringVar(&c.host, "H", "", "server host (alias)")
 	fs.IntVar(&c.port, "port", 50051, "server port")
 	fs.IntVar(&c.port, "p", 50051, "server port (alias)")
-	fs.StringVar(&c.token, "token", "", "bearer token")
-	fs.StringVar(&c.token, "t", "", "bearer token (alias)")
+	c.fs = fs
+	fs.StringVar(&c.token, "token", "", "bearer token (DEPRECATED: visible in ps; use --token-from)")
+	fs.StringVar(&c.token, "t", "", "bearer token (alias, DEPRECATED)")
+	fs.StringVar(&c.tokenFrom, "token-from", "", "read the bearer token from a secret reference: systemd-creds:NAME, keychain:SERVICE/ACCOUNT, keepassxc:ENTRY or file:PATH")
 	fs.StringVar(&c.certFile, "cert", "", "server cert PEM to trust")
 	fs.StringVar(&c.clientCert, "client-cert", "", "client cert PEM for mTLS")
 	fs.StringVar(&c.clientKey, "client-key", "", "client key PEM for mTLS")
@@ -42,9 +50,58 @@ func (c *commonFlags) validate() error {
 	if c.host == "" {
 		return errors.New("--host (-H) is required")
 	}
-	if c.token == "" {
-		return errors.New("--token (-t) is required")
+	if err := c.resolveToken(context.Background()); err != nil {
+		return err
 	}
+	if c.token == "" {
+		return errors.New("--token-from (or the deprecated --token/-t) is required")
+	}
+	return nil
+}
+
+// openSecret resolves a secretsource reference; tests replace it.
+var openSecret = func(ctx context.Context, ref string) ([]byte, error) {
+	s, err := secretsource.Open(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	defer s.Close()
+	return append([]byte(nil), s.Bytes()...), nil
+}
+
+// resolveToken applies --token-from, refuses it together with the plain
+// --token/-t, and warns on stderr when the plain flag is used: its value is
+// visible in ps and in /proc/PID/cmdline.
+func (c *commonFlags) resolveToken(ctx context.Context) error {
+	plain := false
+	c.fs.Visit(func(f *flag.Flag) {
+		if f.Name == "token" || f.Name == "t" {
+			plain = true
+		}
+	})
+	if plain && c.tokenFrom != "" {
+		return errors.New("--token-from and --token/-t are mutually exclusive")
+	}
+	if plain {
+		w := c.stderr
+		if w == nil {
+			w = os.Stderr
+		}
+		fmt.Fprintln(w, "signage-cli: --token/-t is deprecated (the value is visible in ps); use --token-from <ref>")
+	}
+	if c.tokenFrom == "" {
+		return nil
+	}
+	raw, err := openSecret(ctx, c.tokenFrom)
+	if err != nil {
+		return fmt.Errorf("--token-from: %w", err)
+	}
+	tok := strings.TrimRight(string(raw), "\r\n")
+	clear(raw)
+	if tok == "" {
+		return errors.New("--token-from: the secret is empty")
+	}
+	c.token = tok
 	return nil
 }
 
