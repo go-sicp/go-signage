@@ -9,9 +9,8 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 
-	"github.com/go-authn/secretsource"
+	"github.com/go-authn/secretsource/secretflag"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
@@ -19,16 +18,17 @@ import (
 )
 
 type commonFlags struct {
-	host       string
-	port       int
-	token      string
-	tokenFrom  string
-	fs         *flag.FlagSet
-	stderr     io.Writer
-	certFile   string
-	clientCert string
-	clientKey  string
-	insecure   bool
+	host   string
+	port   int
+	token  string
+	fs     *flag.FlagSet
+	stderr io.Writer
+
+	tokenBinding *secretflag.Binding
+	certFile     string
+	clientCert   string
+	clientKey    string
+	insecure     bool
 }
 
 func registerCommonFlags(fs *flag.FlagSet, c *commonFlags) {
@@ -37,9 +37,7 @@ func registerCommonFlags(fs *flag.FlagSet, c *commonFlags) {
 	fs.IntVar(&c.port, "port", 50051, "server port")
 	fs.IntVar(&c.port, "p", 50051, "server port (alias)")
 	c.fs = fs
-	fs.StringVar(&c.token, "token", "", "bearer token (DEPRECATED: visible in ps; use --token-from)")
-	fs.StringVar(&c.token, "t", "", "bearer token (alias, DEPRECATED)")
-	fs.StringVar(&c.tokenFrom, "token-from", "", "read the bearer token from a secret reference: systemd-creds:NAME, keychain:SERVICE/ACCOUNT, keepassxc:ENTRY or file:PATH")
+	c.tokenBinding = secretflag.AddStd(fs, warnWriter{c}, "token", &c.token, "bearer token", "t")
 	fs.StringVar(&c.certFile, "cert", "", "server cert PEM to trust")
 	fs.StringVar(&c.clientCert, "client-cert", "", "client cert PEM for mTLS")
 	fs.StringVar(&c.clientKey, "client-key", "", "client key PEM for mTLS")
@@ -59,50 +57,23 @@ func (c *commonFlags) validate() error {
 	return nil
 }
 
-// openSecret resolves a secretsource reference; tests replace it.
-var openSecret = func(ctx context.Context, ref string) ([]byte, error) {
-	s, err := secretsource.Open(ctx, ref)
-	if err != nil {
-		return nil, err
+// warnWriter sends the deprecation warning to commonFlags.stderr, read at
+// write time (tests set it after the flags are registered), else os.Stderr.
+type warnWriter struct{ c *commonFlags }
+
+func (w warnWriter) Write(p []byte) (int, error) {
+	out := w.c.stderr
+	if out == nil {
+		out = os.Stderr
 	}
-	defer s.Close()
-	return append([]byte(nil), s.Bytes()...), nil
+	return out.Write(p)
 }
 
 // resolveToken applies --token-from, refuses it together with the plain
 // --token/-t, and warns on stderr when the plain flag is used: its value is
 // visible in ps and in /proc/PID/cmdline.
 func (c *commonFlags) resolveToken(ctx context.Context) error {
-	plain := false
-	c.fs.Visit(func(f *flag.Flag) {
-		if f.Name == "token" || f.Name == "t" {
-			plain = true
-		}
-	})
-	if plain && c.tokenFrom != "" {
-		return errors.New("--token-from and --token/-t are mutually exclusive")
-	}
-	if plain {
-		w := c.stderr
-		if w == nil {
-			w = os.Stderr
-		}
-		fmt.Fprintln(w, "signage-cli: --token/-t is deprecated (the value is visible in ps); use --token-from <ref>")
-	}
-	if c.tokenFrom == "" {
-		return nil
-	}
-	raw, err := openSecret(ctx, c.tokenFrom)
-	if err != nil {
-		return fmt.Errorf("--token-from: %w", err)
-	}
-	tok := strings.TrimRight(string(raw), "\r\n")
-	clear(raw)
-	if tok == "" {
-		return errors.New("--token-from: the secret is empty")
-	}
-	c.token = tok
-	return nil
+	return secretflag.Resolve(ctx, c.tokenBinding)
 }
 
 func (c *commonFlags) dial(ctx context.Context) (*grpc.ClientConn, context.Context, error) {
