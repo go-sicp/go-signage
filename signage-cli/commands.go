@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -401,7 +402,12 @@ func cmdDiscover(args []string) error {
 	return nil
 }
 
-func cmdConnect(args []string) error {
+func cmdConnect(args []string) error { return connectTo(os.Stdout, args) }
+
+// connectTo parses a signage:// URL. It refuses one that carries a token
+// (argv, shell history and ps would keep it) and never prints a token: the
+// token is given by reference with --token-from.
+func connectTo(w io.Writer, args []string) error {
 	if len(args) == 0 {
 		return errors.New("usage: signage-cli connect signage://...")
 	}
@@ -413,10 +419,12 @@ func cmdConnect(args []string) error {
 		return fmt.Errorf("expected signage:// scheme, got %q", u.Scheme)
 	}
 	q := u.Query()
-	fmt.Printf("host:        %s\n", u.Hostname())
-	fmt.Printf("port:        %s\n", u.Port())
-	fmt.Printf("token:       %s\n", q.Get("token"))
-	fmt.Printf("fingerprint: %s\n", q.Get("fp"))
+	if q.Has("token") {
+		return errors.New("the URL carries a token, which would stay in argv and shell history; remove ?token= and pass --token-from <ref> to the other commands")
+	}
+	fmt.Fprintf(w, "host:        %s\n", u.Hostname())
+	fmt.Fprintf(w, "port:        %s\n", u.Port())
+	fmt.Fprintf(w, "fingerprint: %s\n", q.Get("fp"))
 	return nil
 }
 

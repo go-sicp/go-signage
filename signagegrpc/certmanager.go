@@ -138,6 +138,11 @@ func (cm *CertManager) ClientKeyPEM() []byte {
 	return append([]byte(nil), cm.clientKey...)
 }
 
+// TokenPath and AdminTokenPath name the 0600 files holding the tokens, so
+// callers can point at them instead of printing the values.
+func (cm *CertManager) TokenPath() string      { return filepath.Join(cm.tlsDir, "token.txt") }
+func (cm *CertManager) AdminTokenPath() string { return filepath.Join(cm.tlsDir, "admin-token.txt") }
+
 func (cm *CertManager) Token() string      { cm.mu.RLock(); defer cm.mu.RUnlock(); return cm.token }
 func (cm *CertManager) AdminToken() string { cm.mu.RLock(); defer cm.mu.RUnlock(); return cm.adminTok }
 
